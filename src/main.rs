@@ -1,3 +1,5 @@
+use std::net::Ipv4Addr;
+
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
 pub enum Features {
@@ -71,8 +73,8 @@ pub enum Status {
 }
 
 pub enum AudioEncoding {
-    Alac = 0,
-    PCM = 1
+    PCM = 0,
+    Alac = 1
 }
 
 pub enum AirPlaySecurity {
@@ -84,13 +86,13 @@ pub enum AirPlaySecurity {
 pub struct AirplayDevice {
     active: bool,
     audio_supported: bool,
-    host: String,
+    name: String,
+    host: Ipv4Addr,
     port: u16,
     airplay2: bool,
     encoding: AudioEncoding,
     security: AirPlaySecurity,
     transient: bool,
-    legacy_shairport: bool,
     sonos_mfi: bool
 }
 
@@ -103,15 +105,10 @@ fn main() {
     all_devices.append(&mut scan_devices( &airplay_mdns, 3));
     println!("Found {} devices", all_devices.len());
     for device in all_devices {
-            //  println!(
-            //     "Found new airplay devices: {} host: {} port: {} IP: {:?} TXT properties: {:?}",
-            //         device.get_fullname(),
-            //         device.get_hostname(),
-            //         device.get_port(),
-            //         device.get_addresses(),
-            //         device.get_properties(),
-            //  );
-            device_conv(device);
+            let airtune_device = device_conv(device);
+            println!("Device: {} Host: {}:{} Airplay2: {} Audio: {} Encoding: {:?} Security: {:?} Transient: {} Sonos: {}",
+            airtune_device.name, airtune_device.host, airtune_device.port, airtune_device.airplay2, airtune_device.audio_supported, airtune_device.encoding as u64, airtune_device.security as u64, airtune_device.transient, airtune_device.sonos_mfi);
+
     }
     
 }
@@ -146,20 +143,24 @@ fn scan_devices(service_type: &str, timeout: u64) -> Vec<ServiceInfo> {
 fn device_conv(device : ServiceInfo) 
 -> AirplayDevice 
 {
-    let mut airplay2 = false;
+    let mut airplay2: bool = false;
     let mut features : u64 = 0;
     let mut status : u64 = 0;
+    let mut sonos_flag : bool = false;
     let mut encryption_type : Vec<&str> = Vec::new();
     let mut audio_formats : Vec<&str> = Vec::new();
-    if device.get_fullname().contains("airplay") {
+    let mut model = "";
+    let mut sv = "";
+    let mut pw = "";
+    if device.get_fullname().contains("_airplay._tcp") {
         airplay2 = true;
     }
     for property in device.get_properties().iter(){
-        println!("{}: {}", property.key(), property.val_str());
+      //  println!("{}: {}", property.key(), property.val_str());
 
         if property.key() == "features" || property.key() == "ft" {
             // Split the features key into 2 hex strings (if there is a comma)
-            println!("Feature string : {}", property.val_str());
+            // println!("Feature string : {}", property.val_str());
             let features_strings: Vec<&str> = property.val_str().split(",").collect();
             if features_strings.len() == 2 {
                 let features1 = features_strings[0].trim_start_matches("0x");
@@ -167,12 +168,12 @@ fn device_conv(device : ServiceInfo)
                 let mut features_joined = String::from(features2);
                 features_joined.push_str(features1);
                 features = u64::from_str_radix( &features_joined, 16).unwrap();
-                println!("Feature: {}", features);
-                println!("Video: {}", get_nth_bit(features, Features::Video as u64));
+                // println!("Feature: {}", features);
+                // println!("Video: {}", get_nth_bit(features, Features::Video as u64));
             }
             else {
                 features = u64::from_str_radix(property.val_str().trim_start_matches("0x"), 16).unwrap();
-                println!("Feature: {}", features);
+                // println!("Feature: {}", features);
             }            
         }
 
@@ -186,28 +187,109 @@ fn device_conv(device : ServiceInfo)
 
         if property.key() == "cn" {
             audio_formats = property.val_str().split(",").collect();
-        }        
+        }
+
+        if property.key() == "manufacturer" {
+            sonos_flag = property.val_str().contains("Sonos");
+        } 
+
+        if property.key() == "am" {
+            model = property.val_str();
+        } 
+
+        if property.key() == "sv" {
+            sv = property.val_str();
+        } 
+
+        if property.key() == "pw" {
+            pw = property.val_str();
+        } 
+  
     }
 
     let mut codec = match get_nth_bit(features, Features::AudioFormat1 as u64) {
-        0 => AudioEncoding::Alac,
-        1 => AudioEncoding::PCM,
+        0 => AudioEncoding::PCM,
         _ => AudioEncoding::Alac
     };
 
+    if audio_formats.len() > 0 {
+        if audio_formats.contains(&"0") {
+            codec = AudioEncoding::PCM;
+        }
+    }
 
+    if model.contains("AppleTV3,1") || model.contains("AirReceiver3,1") || model.contains("AirRecever3,1") || model.contains("Shairport") || sv.contains("false") {
+        codec = AudioEncoding::Alac;
+    }
+      
+    if model.contains("Shairport") {
+        // shairport sync doesn't support airplay 2 via NTP
+        airplay2 = false
+    }
+
+    if encryption_type.contains(&"4") {
+        sonos_flag = true;
+    }
+
+
+    let mut audio_supported = true;
+    if features > 0 {
+        audio_supported = match get_nth_bit(features, Features::Audio as u64) {
+            0 => false,
+            _ => true
+        };
+    }
+
+    let tranisient_supported = match get_nth_bit(features, Features::SupportsTransientPairing as u64) {
+        0 => false,
+        _ => true
+    };
+
+    let mut need_password = match get_nth_bit(status, Status::PasswordRequired as u64) {
+        0 => false,
+        _ => true
+    };
+
+    need_password = need_password || pw.contains("true");
+
+    let need_pin = match get_nth_bit(status, Status::PinRequired as u64) {
+        0 => false,
+        _ => true
+    };
+
+    let one_time_pairing = match get_nth_bit(status, Status::OneTimePairingRequired as u64) {
+        0 => false,
+        _ => true
+    };
+
+    let device_security: AirPlaySecurity = match (need_password, need_pin, one_time_pairing) {
+        (true, false, false) => AirPlaySecurity::Password,
+        (false, true, false) => AirPlaySecurity::Pin,
+        (false, false, true) => AirPlaySecurity::Pin,
+        (false, true, true) => AirPlaySecurity::Pin,
+        _ => AirPlaySecurity::None
+    };
+
+    let mut device_name = String::from(device.get_fullname());
+    device_name = device_name.replace("._raop._tcp.local.", "").replace("._airplay._tcp.local.", "");
+
+    // remove all text before @ in device_name (if it exists)
+    let at_index = device_name.find("@");
+    if at_index.is_some() {
+        device_name = device_name.split_at(at_index.unwrap() + 1).1.to_string();
+    }
 
     AirplayDevice {
-        active: bool,
-        audio_supported: bool,
-        host: String,
-        port: u16,
-        airplay2: bool,
-        encoding: AudioEncoding,
-        security: AirPlaySecurity,
-        transient: bool,
-        legacy_shairport: bool,
-        sonos_mfi: bool
+        active: true,
+        audio_supported: audio_supported,
+        name: String::from(device_name),
+        host: *device.get_addresses().iter().next().unwrap(),
+        port: device.get_port(),
+        airplay2: airplay2,
+        encoding: codec,
+        security: device_security,
+        transient: tranisient_supported,
+        sonos_mfi: sonos_flag
     }
 
 }
