@@ -107,8 +107,6 @@ pub fn get_airplay_devices() -> Vec<AirplayDevice> {
     let mut airplay_devices: Vec<AirplayDevice> = Vec::new();
     for device in all_devices {
             let mut airtune_device = device_conv(device);
-            // println!("Device: {} Host: {}:{} Airplay2: {} Audio: {} Encoding: {:?} Security: {:?} Transient: {} Sonos: {}",
-            // airtune_device.name, airtune_device.host, airtune_device.port, airtune_device.airplay2, airtune_device.audio_supported, airtune_device.encoding as u64, airtune_device.security as u64, airtune_device.transient, airtune_device.sonos_mfi);
             // Check if host and ip of devices is already in airplay_devices
             // if so, update the device
             // if not, add the device
@@ -300,7 +298,7 @@ fn device_conv(device : ServiceInfo)
     }
 
     AirplayDevice {
-        active: true,
+        active: false,
         audio_supported: audio_supported,
         name: String::from(device_name),
         host: *device.get_addresses().iter().next().unwrap(),
