@@ -129,14 +129,6 @@ fn scan_devices(service_type: &str, timeout: u64) -> Vec<ServiceInfo> {
         }
         match event {
             ServiceEvent::ServiceResolved(info) => {
-                // println!(
-                //     "Resolved a new service: {} host: {} port: {} IP: {:?} TXT properties: {:?}",
-                //     info.get_fullname(),
-                //     info.get_hostname(),
-                //     info.get_port(),
-                //     info.get_addresses(),
-                //     info.get_properties(),
-                // );
                 devices.push(info);
             }
             _other_event => {
@@ -152,14 +144,18 @@ fn scan_devices(service_type: &str, timeout: u64) -> Vec<ServiceInfo> {
 
 /* Convert ServiceInfo to our own managable struct */
 fn device_conv(device : ServiceInfo) 
-//-> AirplayDevice 
+-> AirplayDevice 
 {
     let mut airplay2 = false;
+    let mut features : u64 = 0;
+    let mut status : u64 = 0;
+    let mut encryption_type : Vec<&str> = Vec::new();
+    let mut audio_formats : Vec<&str> = Vec::new();
     if device.get_fullname().contains("airplay") {
         airplay2 = true;
     }
     for property in device.get_properties().iter(){
-     //   println!("{}: {}", property.key(), property.val_str());
+        println!("{}: {}", property.key(), property.val_str());
 
         if property.key() == "features" || property.key() == "ft" {
             // Split the features key into 2 hex strings (if there is a comma)
@@ -170,17 +166,60 @@ fn device_conv(device : ServiceInfo)
                 let features2 = features_strings[1].trim_start_matches("0x");
                 let mut features_joined = String::from(features2);
                 features_joined.push_str(features1);
-                let features = u64::from_str_radix( &features_joined, 16).unwrap();
+                features = u64::from_str_radix( &features_joined, 16).unwrap();
                 println!("Feature: {}", features);
+                println!("Video: {}", get_nth_bit(features, Features::Video as u64));
             }
             else {
-                let features = u64::from_str_radix(property.val_str().trim_start_matches("0x"), 16).unwrap();
+                features = u64::from_str_radix(property.val_str().trim_start_matches("0x"), 16).unwrap();
                 println!("Feature: {}", features);
-            }
-            
-
-            
+            }            
         }
+
+        if property.key() == "flags" || property.key() == "sf" {
+            status = u64::from_str_radix(property.val_str().trim_start_matches("0x"), 16).unwrap();
+        }
+
+        if property.key() == "et" {
+            encryption_type = property.val_str().split(",").collect();
+        }
+
+        if property.key() == "cn" {
+            audio_formats = property.val_str().split(",").collect();
+        }        
     }
+
+    let mut codec = match get_nth_bit(features, Features::AudioFormat1 as u64) {
+        0 => AudioEncoding::Alac,
+        1 => AudioEncoding::PCM,
+        _ => AudioEncoding::Alac
+    };
+
+
+
+    AirplayDevice {
+        active: bool,
+        audio_supported: bool,
+        host: String,
+        port: u16,
+        airplay2: bool,
+        encoding: AudioEncoding,
+        security: AirPlaySecurity,
+        transient: bool,
+        legacy_shairport: bool,
+        sonos_mfi: bool
+    }
+
+}
+
+fn get_n_from_shift(shift_value: u64) -> u32 {
+    (shift_value as f64).log2() as u32
+}
+
+
+/* Get the nth bit of a number */
+fn get_nth_bit(number: u64, mask: u64) -> u64 {
+    let n = get_n_from_shift(mask);
+    (number & mask) >> n
 }
 
