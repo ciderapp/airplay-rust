@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 mdns-sd = { git = "https://github.com/keepsimple1/mdns-sd" }
+tokio = { version = "1.29.1", features = ["full"] }
+chrono = "0.4"
+byteorder = "1.4.3"
