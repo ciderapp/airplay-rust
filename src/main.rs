@@ -4,6 +4,7 @@ mod player;
 use discovery::get_airplay_devices;
 
 use player::udp_servers::UDPServers;
+use tokio::{task, time};
 
 // fn main(){
 //     let all_devices = get_airplay_devices();
@@ -15,13 +16,11 @@ use player::udp_servers::UDPServers;
 // }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
-    let servers = UDPServers::new().await?;
-    println!("Timing Port: {}", servers.timing_port);
-    println!("Control Port: {}", servers.control_port);
-    servers.run().await;
-    
-
-    Ok(())
+async fn main(){
+    let udp_servers = UDPServers::new().await.unwrap();
+    println!("Timing Port: {}", udp_servers.timing_port);
+    println!("Control Port: {}", udp_servers.control_port);
+    task::spawn(async {
+      udp_servers.run().await;
+    });  
 }
