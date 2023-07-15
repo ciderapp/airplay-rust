@@ -3,6 +3,8 @@ mod player;
 
 use discovery::get_airplay_devices;
 
+use player::udp_servers::UDPServers;
+
 // fn main(){
 //     let all_devices = get_airplay_devices();
 //     println!("Found {} devices", all_devices.len());
@@ -12,8 +14,14 @@ use discovery::get_airplay_devices;
 //     }
 // }
 
-fn main(){
-   let ntp = player::ntp::NTP::new(); 
-   println!("NTP: {:?}", ntp.time_ref());
-   println!("NTP: {:?}", ntp.timestamp());
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    let servers = UDPServers::new().await?;
+    println!("Timing Port: {}", servers.timing_port);
+    println!("Control Port: {}", servers.control_port);
+    servers.run().await;
+    
+
+    Ok(())
 }
